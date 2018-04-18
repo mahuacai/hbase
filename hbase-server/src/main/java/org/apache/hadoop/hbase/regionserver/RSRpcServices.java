@@ -1048,6 +1048,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     InetSocketAddress initialIsa;
     InetSocketAddress bindAddress;
     if(this instanceof MasterRpcServices) {
+      // 如果是master
       String hostname = getHostname(rs.conf, true);
       int port = rs.conf.getInt(HConstants.MASTER_PORT, HConstants.DEFAULT_MASTER_PORT);
       // Creation of a HSA will force a resolve.
@@ -1070,6 +1071,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler,
     // Set how many times to retry talking to another server over HConnection.
     ConnectionUtils.setServerSideHConnectionRetriesConfig(rs.conf, name, LOG);
     try {
+      // bind rpc 服务
       rpcServer = new RpcServer(rs, name, getServices(),
           bindAddress, // use final bindAddress for this server.
           rs.conf,

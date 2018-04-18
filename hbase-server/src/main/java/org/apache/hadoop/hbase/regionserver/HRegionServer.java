@@ -236,13 +236,13 @@ public class HRegionServer extends HasThread implements
   /**
    * Cluster connection to be shared by services.
    * Initialized at server startup and closed when server shuts down.
-   * Clients must never close it explicitly.
+   * Clients must never close it explicitly(明确地).
    */
   protected ClusterConnection clusterConnection;
 
   /*
-   * Long-living meta table locator, which is created when the server is started and stopped
-   * when server shuts down. References to this locator shall be used to perform according
+   * Long-living meta table locator(定位器), which is created when the server is started and stopped
+   * when server shuts down. References to this locator shall(应；会；将；必须) be used to perform according
    * operations in EventHandlers. Primary reason for this decision is to make it mockable
    * for tests.
    */
@@ -273,10 +273,10 @@ public class HRegionServer extends HasThread implements
   /**
    * Map of encoded region names to the DataNode locations they should be hosted on
    * We store the value as InetSocketAddress since this is used only in HDFS
-   * API (create() that takes favored nodes as hints for placing file blocks).
+   * API (create() that takes favored(有利的) nodes as hints for(......的提示) placing file blocks).
    * We could have used ServerName here as the value class, but we'd need to
    * convert it to InetSocketAddress at some point before the HDFS API call, and
-   * it seems a bit weird to store ServerName since ServerName refers to RegionServers
+   * it seems a bit weird(怪异的) to store ServerName since ServerName refers to RegionServers
    * and here we really mean DataNode locations.
    */
   protected final Map<String, InetSocketAddress[]> regionFavoredNodesMap =
@@ -284,12 +284,12 @@ public class HRegionServer extends HasThread implements
 
   /**
    * Set of regions currently being in recovering state which means it can accept writes(edits from
-   * previous failed region server) but not reads. A recovering region is also an online region.
+   * previous failed region server) but not reads. A recovering(正在恢复) region is also an online region.
    */
   protected final Map<String, Region> recoveringRegions = Collections
       .synchronizedMap(new HashMap<String, Region>());
 
-  // Leases
+  // Leasesz(出租；租得)
   protected Leases leases;
 
   // Instance of the hbase executor service.
@@ -301,7 +301,7 @@ public class HRegionServer extends HasThread implements
 
   // Set when a report to the master comes back with a message asking us to
   // shutdown. Also set by call to stop when debugging or running unit tests
-  // of HRegionServer in isolation.
+  // of HRegionServer in isolation(隔离；孤立).
   private volatile boolean stopped = false;
 
   // Go down hard. Used if file system becomes unavailable and also in
@@ -421,7 +421,7 @@ public class HRegionServer extends HasThread implements
   protected String useThisHostnameInstead;
 
   // key to the config parameter of server hostname
-  // the specification of server hostname is optional. The hostname should be resolvable from
+  // the specification(规格；说明书；详述) of server hostname is optional. The hostname should be resolvable from
   // both master and region server
   @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.CONFIG)
   final static String RS_HOSTNAME_KEY = "hbase.regionserver.hostname";
@@ -461,17 +461,17 @@ public class HRegionServer extends HasThread implements
   protected TableLockManager tableLockManager;
 
   /**
-   * Nonce manager. Nonces are used to make operations like increment and append idempotent
+   * Nonce( 临时的) manager. Nonces are used to make operations like increment and append idempotent(幂等的)
    * in the case where client doesn't receive the response from a successful operation and
    * retries. We track the successful ops for some time via a nonce sent by client and handle
    * duplicate operations (currently, by failing them; in future we might use MVCC to return
-   * result). Nonces are also recovered from WAL during, recovery; however, the caveats (from
+   * result). Nonces are also recovered from WAL during, recovery; however, the caveats(警告；说明) (from
    * HBASE-3787) are:
    * - WAL recovery is optimized, and under high load we won't read nearly nonce-timeout worth
    *   of past records. If we don't read the records, we don't read and recover the nonces.
    *   Some WALs within nonce-timeout at recovery may not even be present due to rolling/cleanup.
    * - There's no WAL recovery during normal region move, so nonces will not be transfered.
-   * We can have separate additional "Nonce WAL". It will just contain bunch of numbers and
+   * We can have separate additional "Nonce WAL". It will just contain bunch(群；串；突出物) of numbers and
    * won't be flushed on main path - because WAL itself also contains nonces, if we only flush
    * it before memstore flush, for a given nonce we will either see it in the WAL (if it was
    * never flushed to disk, it will be part of recovery), or we'll see it as part of the nonce
@@ -502,6 +502,7 @@ public class HRegionServer extends HasThread implements
    * Starts a HRegionServer at the default location.
    */
   public HRegionServer(Configuration conf) throws IOException, InterruptedException {
+  	// CoordinatedStateManagerFactory.getCoordinatedStateManager(conf) 初始化状态控制器
     this(conf, CoordinatedStateManagerFactory.getCoordinatedStateManager(conf));
   }
 
@@ -514,16 +515,23 @@ public class HRegionServer extends HasThread implements
     super("RegionServer");  // thread name
     this.fsOk = true;
     this.conf = conf;
+    // 检验参数
     checkCodecs(this.conf);
+
     this.userProvider = UserProvider.instantiate(conf);
+    // 是否开启hdfs 的短读功能
     FSUtils.setupShortCircuitRead(this.conf);
     // Disable usage of meta replicas in the regionserver
     this.conf.setBoolean(HConstants.USE_META_REPLICAS, false);
 
     // Config'ed params
+    //读取client的最大重试次数
     this.numRetries = this.conf.getInt(HConstants.HBASE_CLIENT_RETRIES_NUMBER,
         HConstants.DEFAULT_HBASE_CLIENT_RETRIES_NUMBER);
+    //检查memstore是否超过hbase.hregion.memstore.flush.size设置的flush大小的时间间隔
     this.threadWakeFrequency = conf.getInt(HConstants.THREAD_WAKE_FREQUENCY, 10 * 1000);
+    //定时向master发送此rs的报告的间隔时间，默认为3s=3000ms
+    // 可以理解为心跳
     this.msgInterval = conf.getInt("hbase.regionserver.msginterval", 3 * 1000);
 
     this.sleeper = new Sleeper(this.msgInterval, this);
@@ -531,6 +539,7 @@ public class HRegionServer extends HasThread implements
     boolean isNoncesEnabled = conf.getBoolean(HConstants.HBASE_RS_NONCES_ENABLED, true);
     this.nonceManager = isNoncesEnabled ? new ServerNonceManager(this.conf) : null;
 
+    //配置向master进行region的region个数
     this.numRegionsToReport = conf.getInt(
       "hbase.regionserver.numregionstoreport", 10);
 
@@ -538,13 +547,14 @@ public class HRegionServer extends HasThread implements
       HConstants.HBASE_CLIENT_OPERATION_TIMEOUT,
       HConstants.DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT);
 
+    //操作超时时间
     this.shortOperationTimeout = conf.getInt(
       HConstants.HBASE_RPC_SHORTOPERATION_TIMEOUT_KEY,
       HConstants.DEFAULT_HBASE_RPC_SHORTOPERATION_TIMEOUT);
 
     this.abortRequested = false;
     this.stopped = false;
-
+    // 创建rpc 通信
     rpcServices = createRpcServices();
     this.startcode = System.currentTimeMillis();
     if (this instanceof HMaster) {
@@ -560,6 +570,7 @@ public class HRegionServer extends HasThread implements
     rpcRetryingCallerFactory = RpcRetryingCallerFactory.instantiate(this.conf);
 
     // login the zookeeper client principal (if using security)
+    // 若使用了kerberos认证，则登录zookeeper客户端认证，登录server认证
     ZKUtil.loginClient(this.conf, HConstants.ZK_CLIENT_KEYTAB_FILE,
       HConstants.ZK_CLIENT_KERBEROS_PRINCIPAL, hostName);
     // login the server principal (if using secure Hadoop)
@@ -567,17 +578,20 @@ public class HRegionServer extends HasThread implements
     // init superusers and add the server principal (if using security)
     // or process owner as default super user.
     Superusers.initialize(conf);
-
+    //生成用来记录此rs中所有的memstore所占大小的实例
     regionServerAccounting = new RegionServerAccounting();
     uncaughtExceptionHandler = new UncaughtExceptionHandler() {
       @Override
-      public void uncaughtException(Thread t, Throwable e) {
+      public void uncaughtException
+			  (Thread t, Throwable e) {
         abort("Uncaught exception in service thread " + t.getName(), e);
       }
     };
 
     useZKForAssignment = ConfigUtil.useZKForAssignment(conf);
 
+    // 初始化文件系统
+    // 设置hdfs的defaultFS目录（要确保hbase-site.xml里配置的root目录和hadoop中的hdfs-site.xml中的defaultFS目录一模一样）。
     initializeFileSystem();
 
     service = new ExecutorService(getServerName().toShortString());
@@ -586,24 +600,37 @@ public class HRegionServer extends HasThread implements
     // Some unit tests don't need a cluster, so no zookeeper at all
     if (!conf.getBoolean("hbase.testing.nocluster", false)) {
       // Open connection to zookeeper and set primary watcher
+      //创建当前rs与zk的连接
+      // 设置zookeepeerWatcher,所需参数有配置Configuration，hostname+端口号，本实例，znode。
+      // 注意此处的canCreateBaseNode为false，即在HRegionServer启动时是不创建基本的znode节点的
       zooKeeper = new ZooKeeperWatcher(conf, getProcessName() + ":" +
         rpcServices.isa.getPort(), this, canCreateBaseZNode());
 
+      // this.csm.initialize(this)是为该RegionServer初始化了zookeeper的监测，
+      //  1. 如watcher,splitLogWorkerCoordiantion,closeRegionCoordination等。
+      //  2. 用于zookeeper来监测RegionServer的运行状态。
       this.csm = (BaseCoordinatedStateManager) csm;
       this.csm.initialize(this);
       this.csm.start();
 
       tableLockManager = TableLockManager.createTableLockManager(
         conf, zooKeeper, serverName);
-
+      // 创建master的跟踪器，等待master的启动（在zk上注册）
+      // 实例化追踪master服务节点的实例masterAddressTracker并启动该实例。
+      // Hbase使用多Master来解决Master单点故障的问题。主Master服务故障时，它与Zookeeper的心跳延迟超过阈值，
+      // Zookeeper路径下的数据被清理，备Master上的ActiveMasterManager服务会竞争该Master路径，
+      // 成为主Master。MasterAddressTracker是RS内部监听Master节点变化的追踪器。
       masterAddressTracker = new MasterAddressTracker(getZooKeeper(), this);
       masterAddressTracker.start();
-
+      // 创建cluster的跟踪器，等待cluster的启动，也就是master注册clusterid到zk后，表示集群已经启动
+      // ClusterStatusTracker是HBase集群状态追踪器。该选项可以标识当前集群的状态，及它的启动时间。该设置选项有利于集群中的各个工作节点（RS）统一执行启动和退出操作。
+      //上述两个追踪实例均需要zookeeper做参数。
       clusterStatusTracker = new ClusterStatusTracker(zooKeeper, this);
       clusterStatusTracker.start();
     }
     this.configurationManager = new ConfigurationManager();
 
+    //启动rpcService。
     rpcServices.start();
     putUpWebUI();
     this.walRoller = new LogRoller(this, this);

@@ -31,11 +31,11 @@ import com.google.common.annotations.VisibleForTesting;
 /**
  * ScheduledChore is a task performed on a period in hbase. ScheduledChores become active once
  * scheduled with a {@link ChoreService} via {@link ChoreService#scheduleChore(ScheduledChore)}. The
- * chore is run in a {@link ScheduledThreadPoolExecutor} and competes with other ScheduledChores for
- * access to the threads in the core thread pool. If an unhandled exception occurs, the chore
+ * chore is run in a {@link ScheduledThreadPoolExecutor} and competes(竞争) with other ScheduledChores for
+ * access to(接近；有权使用；通向…的入口) the threads in the core thread pool. If an unhandled exception occurs, the chore(家庭杂务；日常的零星事务；讨厌的或累人的工作)
  * cancellation is logged. Implementers should consider whether or not the Chore will be able to
  * execute within the defined period. It is bad practice to define a ScheduledChore whose execution
- * time exceeds its period since it will try to hog one of the threads in the {@link ChoreService}'s
+ * time exceeds its period(周期，期间) since it will try to hog one of the threads in the {@link ChoreService}'s
  * thread pool.
  * <p>
  * Don't subclass ScheduledChore if the task relies on being woken up for something to do, such as

@@ -99,6 +99,7 @@ public abstract class RpcExecutor {
   protected abstract List<BlockingQueue<CallRunner>> getQueues();
 
   protected void startHandlers(final int port) {
+    // 创建多个队列
     List<BlockingQueue<CallRunner>> callQueues = getQueues();
     startHandlers(null, handlerCount, callQueues, 0, callQueues.size(), port);
   }
@@ -184,6 +185,7 @@ public abstract class RpcExecutor {
       MonitoredRPCHandler status = RpcServer.getStatus();
       cr.setStatus(status);
       try {
+        // 统计正在处理的请求个数
         activeHandlerCount.incrementAndGet();
         cr.run();
       } catch (Throwable e) {

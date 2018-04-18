@@ -169,9 +169,10 @@ public class SimpleRpcScheduler extends RpcScheduler implements ConfigurationObs
       PriorityFunction priority,
       Abortable server,
       int highPriorityLevel) {
-
+    // 最大的队列长度
     int maxQueueLength = conf.getInt(RpcScheduler.IPC_SERVER_MAX_CALLQUEUE_LENGTH,
         handlerCount * RpcServer.DEFAULT_MAX_CALLQUEUE_LENGTH_PER_HANDLER);
+    // 最大的优先级队列
     int maxPriorityQueueLength =
         conf.getInt(RpcScheduler.IPC_SERVER_PRIORITY_MAX_CALLQUEUE_LENGTH, maxQueueLength);
 
@@ -179,7 +180,9 @@ public class SimpleRpcScheduler extends RpcScheduler implements ConfigurationObs
     this.highPriorityLevel = highPriorityLevel;
     this.abortable = server;
 
+    // 队列类型
     String callQueueType = conf.get(CALL_QUEUE_TYPE_CONF_KEY, CALL_QUEUE_TYPE_CONF_DEFAULT);
+
     float callqReadShare = conf.getFloat(CALL_QUEUE_READ_SHARE_CONF_KEY, 0);
     float callqScanShare = conf.getFloat(CALL_QUEUE_SCAN_SHARE_CONF_KEY, 0);
 
@@ -197,6 +200,7 @@ public class SimpleRpcScheduler extends RpcScheduler implements ConfigurationObs
 
     if (numCallQueues > 1 && callqReadShare > 0) {
       // multiple read/write queues
+      // 选择算法方式
       if (isDeadlineQueueType(callQueueType)) {
         CallPriorityComparator callPriority = new CallPriorityComparator(conf, this.priority);
         callExecutor = new RWQueueRpcExecutor("DeadlineRWQ.default", handlerCount, numCallQueues,
