@@ -580,13 +580,22 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   private long flushPerChanges;
   private long blockingMemStoreSize;
   final long threadWakeFrequency;
-  // Used to guard closes
+
+  /**
+   * 这两个锁均为ReentrantReadWriteLock类型的读写锁，其中，lock用于Region的close、compact、flush等的并发控制，它控制的是Region的整体行为，更具体的，
+   * compact()和flushCache()方法中,用的是lock的读锁--共享锁，而doClose()方法中，
+   * 用的是lock的写锁--独占锁，这也就意味着，在Region下线，执行doClose()方法时，它必须等待compact()和flushCache()方法调用完，
+   * 且一旦它获得了lock的写锁，后续Region将不会再执行Region的compact和flush，当然，doClose()内部仍然会在下线前flush掉它的memstore，
+   * 同时共享锁业也实现了Region的flush和compact在理论上可以同时进行。而updatesLock则用于Region数据更新方面，在flush的核心方法internalFlushcache()中，则是使用的updatesLock的写锁。
+   * */
+  // Used to guard closes 用于保护关闭
   final ReentrantReadWriteLock lock =
     new ReentrantReadWriteLock();
 
-  // Stop updates lock
+  // Stop updates lock 停止更新锁
   private final ReentrantReadWriteLock updatesLock =
     new ReentrantReadWriteLock();
+  
   private boolean splitRequest;
   private byte[] explicitSplitPoint = null;
 
@@ -2017,6 +2026,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    *
    * <p>This method may block for some time, so it should not be called from a
    * time-sensitive thread.
+   *
    * @param forceFlushAllStores whether we want to flush all stores
    * @param writeFlushRequestWalMarker whether to write the flush request marker to WAL
    * @return whether the flush is success and whether the region needs compacting
@@ -2029,24 +2039,40 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   public FlushResult flushcache(boolean forceFlushAllStores, boolean writeFlushRequestWalMarker)
       throws IOException {
     // fail-fast instead of waiting on the lock
+    // 快速失败,而不是等待锁
+    // 如果Region正处于关闭状态，记录日志，并返回CANNOT_FLUSH的刷新结果
     if (this.closing.get()) {
       String msg = "Skipping flush on " + this + " because closing";
       LOG.debug(msg);
       return new FlushResultImpl(FlushResult.Result.CANNOT_FLUSH, msg, false);
     }
+    // 获取任务追踪器，并创建初始状态
     MonitoredTask status = TaskMonitor.get().createStatus("Flushing " + this);
+    // 设置任务追踪器的状态：请求Region读锁
     status.setStatus("Acquiring readlock on region");
     // block waiting for the lock for flushing cache
+    // 获取Region的读锁，阻塞等待刷新缓存的锁释放
+
+    /**
+     * 我的理解，这个lock锁好像是Region行为上的一个读写锁，加上这个锁，控制Region的整体行为，比如flush、compact、close等，
+     * flush和compact使用的是读锁，是一个共享锁，意味着flush和compact可以同步进行，但是不能执行close，因为close是写锁，
+     * 它是一个独占锁，一旦它占用锁，其他线程就不能发起flush、compact等操作，当然，close线程本身除外，因为Region在下线前要保证
+     * MemStore内的数据被flush到文件。
+     */
     lock.readLock().lock();
     try {
+      // 如果Region已经下线，记录日志并返回CANNOT_FLUSH的结果
       if (this.closed.get()) {
         String msg = "Skipping flush on " + this + " because closed";
         LOG.debug(msg);
         status.abort(msg);
         return new FlushResultImpl(FlushResult.Result.CANNOT_FLUSH, msg, false);
       }
+      // 如果协处理器不为空
       if (coprocessorHost != null) {
+        // 设置任务追踪器的状态：执行协处理器预刷写钩子preFlush()方法
         status.setStatus("Running coprocessor pre-flush hooks");
+        // 执行协处理器预刷写钩子preFlush()方法
         coprocessorHost.preFlush();
       }
       // TODO: this should be managed within memstore with the snapshot, updated only after flush
@@ -2057,8 +2083,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       }
       synchronized (writestate) {
         if (!writestate.flushing && writestate.writesEnabled) {
+          // 如果writestate不是flushing，且writestate的可以读取启用，将状态中的flushing设置为true，表示正在刷新
           this.writestate.flushing = true;
         } else {
+          // 否则记录日志，并返回CANNOT_FLUSH的结果
           if (LOG.isDebugEnabled()) {
             LOG.debug("NOT flushing memstore for region " + this
                 + ", flushing=" + writestate.flushing + ", writesEnabled="
@@ -2075,17 +2103,22 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       try {
         Collection<Store> specificStoresToFlush =
             forceFlushAllStores ? stores.values() : flushPolicy.selectStoresToFlush();
+        // 执行真正的flush
         FlushResult fs = internalFlushcache(specificStoresToFlush,
           status, writeFlushRequestWalMarker);
 
+        // 刷新结束后，如果协处理器不为空，执行协处理器的钩子方法postFlush()
         if (coprocessorHost != null) {
           status.setStatus("Running post-flush coprocessor hooks");
           coprocessorHost.postFlush();
         }
 
+        // 状态追踪器标记完成状态
         status.markComplete("Flush successful");
+        // 返回刷新结果
         return fs;
       } finally {
+        // 将writestate中的flushing、flushRequested均设置为false
         synchronized (writestate) {
           writestate.flushing = false;
           this.writestate.flushRequested = false;
@@ -2093,7 +2126,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         }
       }
     } finally {
+      // 释放读锁
       lock.readLock().unlock();
+      // 清空状态
       status.cleanup();
     }
   }

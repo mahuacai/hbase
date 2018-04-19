@@ -909,6 +909,7 @@ public class HRegionServer extends HasThread implements
     this.leases = new Leases(this.threadWakeFrequency);
 
     // Create the thread to clean the moved regions list
+    // 创建线程用来清理已经迁移的region 的列表
     movedRegionsCleaner = MovedRegionsCleaner.create(this);
 
     if (this.nonceManager != null) {
