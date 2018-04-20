@@ -2391,6 +2391,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     byte[] encodedRegionName = getRegionInfo().getEncodedNameAsBytes();
 
     long trxId = 0;
+
     MultiVersionConcurrencyControl.WriteEntry writeEntry = mvcc.begin();
     // wait for all in-progress transactions to commit to WAL before
     // we can start the flush. This prevents
@@ -2404,8 +2405,15 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     try {
       try {
         if (wal != null) {
+          // startCacheFlush实际上做了两件事：
+          //     1、调用closeBarrier.beginOp()方法，确定开始一个flush操作；
+          //     2、Region名对应的最近序列化Id从数据结构
+          // oldestUnflushedRegionSequenceIds移动到lowestFlushingRegionSequenceIds中
+          // 疑问：oldestUnflushedRegionSequenceIds中数据是何时放入的？用它来做什么呢？
+          // 在FSHLog的append()方法中，如果entry.isInMemstore()，putIfAbsent放入的
           Long earliestUnflushedSequenceIdForTheRegion =
             wal.startCacheFlush(encodedRegionName, flushedFamilyNames);
+
           if (earliestUnflushedSequenceIdForTheRegion == null) {
             // This should never happen. This is how startCacheFlush signals flush cannot proceed.
             String msg = this.getRegionInfo().getEncodedName() + " flush aborted; WAL closing.";
@@ -2414,6 +2422,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
               new FlushResultImpl(FlushResult.Result.CANNOT_FLUSH, msg, false),
               myseqid);
           }
+          // wal不为空的话，获取下一个序列号
           flushOpSeqId = getNextSequenceId(wal);
           // Back up 1, minus 1 from oldest sequence id in memstore to get last 'flushed' edit
           flushedSeqId =
@@ -2421,18 +2430,33 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
               flushOpSeqId: earliestUnflushedSequenceIdForTheRegion.longValue() - 1;
         } else {
           // use the provided sequence Id as WAL is not being used for this flush.
+          // 这里myseqid传递进来的是-1
           flushedSeqId = flushOpSeqId = myseqid;
         }
 
+        // 循环该Region所有的store，预处理storeFlushCtxs、committedFiles
+        // 1、累加每个store可以flush的memstore大小至totalFlushableSize；
+        // 2、初始化storeFlushCtxs，为每个store创建对应的flush上下文信息StoreFlusherImpl实例，这些上下文实例携带了同一个刷新序列号
+        // 2、将每个store对应的StoreFlushContext添加到ArrayList列表storeFlushCtxs中，实际生成的是StoreFlusherImpl实例
+        // 3、将每个store对应的FamilyName添加到TreeMap集合committedFiles中，以备
+        // 3、初始化committedFiles：将每个store对应的列名放置到committedFiles的key中，value暂时为null
         for (Store s : storesToFlush) {
           totalFlushableSizeOfFlushableStores += s.getFlushableSize();
+          // 这里只是构造一个StoreFlusherImpl对象，该对象只有cacheFlushSeqNum一个变量被初始化为flushSeqId
+          // 然后，加入到storeFlushCtxs列表
           storeFlushCtxs.put(s.getFamily().getName(), s.createFlushContext(flushOpSeqId));
           committedFiles.put(s.getFamily().getName(), null); // for writing stores to WAL
           storeFlushableSize.put(s.getFamily().getName(), s.getFlushableSize());
         }
 
         // write the snapshot start to WAL
+        // 在WAL中写一个刷新的开始标记，并获取一个事务ID
         if (wal != null && !writestate.readOnly) {
+
+          // 其实就是往WAL中append一条记录：row为Region所在的startKey，
+          // family为METAFAMILY，
+          // qualifier为HBASE::FLUSH，
+          // value为FlushDescriptor
           FlushDescriptor desc = ProtobufUtil.toFlushDescriptor(FlushAction.START_FLUSH,
             getRegionInfo(), flushOpSeqId, committedFiles);
           // no sync. Sync is below where we do not hold the updates lock
@@ -2441,7 +2465,15 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         }
 
         // Prepare flush (take a snapshot)
+        // 循环storeFlushCtxs，为每个StoreFlushContext做准备工作，主要是生成memstore的快照
         for (StoreFlushContext flush : storeFlushCtxs.values()) {
+          /**
+           * 刷新前的准备工作
+           * 1、获取memstore的快照，并赋值到snapshot；
+           * 2、获取flush的数目，即待刷新cell数目，并赋值到cacheFlushCount；
+           * 3、获取flush的大小，并赋值到cacheFlushSize；
+           * 4、创建空的已提交文件列表，大小为1。
+           */
           flush.prepare();
         }
       } catch (IOException ex) {
