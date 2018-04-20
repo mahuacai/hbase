@@ -595,7 +595,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   // Stop updates lock 停止更新锁
   private final ReentrantReadWriteLock updatesLock =
     new ReentrantReadWriteLock();
-  
+
   private boolean splitRequest;
   private byte[] explicitSplitPoint = null;
 
@@ -2268,16 +2268,21 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   protected PrepareFlushResult internalPrepareFlushCache(final WAL wal, final long myseqid,
       final Collection<Store> storesToFlush, MonitoredTask status, boolean writeFlushWalMarker)
   throws IOException {
+    //  如果RegionServerServices类型的rsServices不为空，且为夭折的，直接抛出异常
     if (this.rsServices != null && this.rsServices.isAborted()) {
       // Don't flush when server aborting, it's unsafe
       throw new IOException("Aborting flush because server is aborted...");
     }
+    // 记录刷新开始时间
     final long startTime = EnvironmentEdgeManager.currentTime();
     // If nothing to flush, return, but we need to safely update the region sequence id
+    // 如果没有需要刷新的数据，返回，但是我们需要安全的更新region的 sequence id
     if (this.memstoreSize.get() <= 0) {
       // Take an update lock because am about to change the sequence id and we want the sequence id
       // to be at the border of the empty memstore.
+      // 获取一个更新锁，因为我们即将要更新一个序列ID，并且我们想让这个序列ID成为一个空的memstore的边界
       MultiVersionConcurrencyControl.WriteEntry writeEntry = null;
+      // 获取更新锁的写锁
       this.updatesLock.writeLock().lock();
       try {
         if (this.memstoreSize.get() <= 0) {
@@ -2287,6 +2292,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           // sure just beyond the last appended region edit (useful as a marker when bulk loading,
           // etc.). NOTE: The writeEntry write number is NOT in the WAL.. there is no WAL writing
           // here.
+          // 假设如果有memstore仍然没有数据
           if (wal != null) {
             writeEntry = mvcc.begin();
             long flushOpSeqId = writeEntry.getWriteNumber();
@@ -2310,6 +2316,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           }
         }
       } finally {
+        // 释放更新锁
         this.updatesLock.writeLock().unlock();
         if (writeEntry != null) {
           mvcc.complete(writeEntry);
@@ -2337,11 +2344,23 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     // allow updates again so its value will represent the size of the updates received
     // during flush
 
+    // 当我们更新所有这些region存储的memstore的快照时，停止更新操作。
+    // 我们这样做一瞬间，它是非常迅速的。
+    // 在我们允许再次更新时，我们也设置memstore的大小为0，所以它的大小也代表了在flush期间接收到的更新的大小
+
+
     // We have to take an update lock during snapshot, or else a write could end up in both snapshot
     // and memstore (makes it difficult to do atomic rows then)
+    // 我们需要在快照期间的一个更新锁，否则一个写入最终在快照与内存之前完成（届时将很难做原子行的保证）
+    // 获得锁以阻塞并发的更新
+    // 设置状态跟踪器的状态：获取锁以阻塞并发的更新
     status.setStatus("Obtaining lock to block concurrent updates");
+
     // block waiting for the lock for internal flush
+    // 阻塞，等待flush的锁
+    // 获得updatesLock的写锁，阻塞所有对于该Region的更新操作。
     this.updatesLock.writeLock().lock();
+    
     status.setStatus("Preparing to flush by snapshotting stores in " +
       getRegionInfo().getEncodedName());
     long totalFlushableSizeOfFlushableStores = 0;
