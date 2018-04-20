@@ -2,7 +2,8 @@ hbase 分析
 =====================
 
 1. [hbase 简介](./markdown/hbase简介.md)
-2. hfile 存储介绍</b>
+2. hfile 存储介绍
+    - hbase 在hdfs上存储的结构
        - [HBase – 存储文件HFile结构解析](http://hbasefly.com/2016/03/25/hbase-hfile/)
        - [HBase – 探索HFile索引机制](http://hbasefly.com/2016/04/03/hbase_hfile_index/)
 3. [HregionServer 启动过程](https://blog.csdn.net/mm_bit/article/details/51538292)
