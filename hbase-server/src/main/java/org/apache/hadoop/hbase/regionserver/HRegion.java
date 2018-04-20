@@ -2360,9 +2360,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     // 阻塞，等待flush的锁
     // 获得updatesLock的写锁，阻塞所有对于该Region的更新操作。
     this.updatesLock.writeLock().lock();
-    
+
+    // 设置状态跟踪器的状态：正在准备通过创建存储的快照刷新
     status.setStatus("Preparing to flush by snapshotting stores in " +
       getRegionInfo().getEncodedName());
+
     long totalFlushableSizeOfFlushableStores = 0;
 
     Set<byte[]> flushedFamilyNames = new HashSet<byte[]>();
@@ -2370,18 +2372,21 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       flushedFamilyNames.add(store.getFamily().getName());
     }
 
+    // 创建两个缓存容器：storeFlushCtxs列表和committedFiles映射集合，用来存储刷新过程中的刷新上下文和已完成文件路径
     TreeMap<byte[], StoreFlushContext> storeFlushCtxs
       = new TreeMap<byte[], StoreFlushContext>(Bytes.BYTES_COMPARATOR);
     TreeMap<byte[], List<Path>> committedFiles = new TreeMap<byte[], List<Path>>(
         Bytes.BYTES_COMPARATOR);
     TreeMap<byte[], Long> storeFlushableSize
         = new TreeMap<byte[], Long>(Bytes.BYTES_COMPARATOR);
+
     // The sequence id of this flush operation which is used to log FlushMarker and pass to
     // createFlushContext to use as the store file's sequence id. It can be in advance of edits
     // still in the memstore, edits that are in other column families yet to be flushed.
     long flushOpSeqId = HConstants.NO_SEQNUM;
     // The max flushed sequence id after this flush operation completes. All edits in memstore
     // will be in advance of this sequence id.
+    // 刷新的序列号ID
     long flushedSeqId = HConstants.NO_SEQNUM;
     byte[] encodedRegionName = getRegionInfo().getEncodedNameAsBytes();
 
